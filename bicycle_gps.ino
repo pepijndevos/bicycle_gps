@@ -2,7 +2,7 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
-#include "MPL3115A2.h"
+#include <Adafruit_MPL3115A2.h>
 #include "Adafruit_GFX.h"
 #include "Adafruit_ILI9341.h"
 #include "Adafruit_GPS.h"
@@ -21,7 +21,7 @@
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
 
 // Create an instance of the pressure object
-MPL3115A2 myPressure;
+Adafruit_MPL3115A2 baro = Adafruit_MPL3115A2();
 
 // Set up GPS
 Adafruit_GPS GPS(&Serial2);
@@ -37,15 +37,10 @@ void setup()
 {
   Wire.begin();       // Join i2c bus
   Serial.begin(9600); // Start serial for output
-  myPressure.begin(); // Get sensor online
+  baro.begin();       // Get sensor online
   tft.begin();        // Start TFT
   GPS.begin(9600);    // Start GPS
   SD.begin(SD_CS);     // Mount SD card
-
-  //Configure the sensor
-  myPressure.setModeBarometer(); // Measure pressure in Pascals from 20 to 110 kPa
-  myPressure.setOversampleRate(7); // Set Oversample to the recommended 128
-  myPressure.enableEventFlags(); // Enable all three pressure and temp event flags
  
   // uncomment this line to turn on RMC (recommended minimum) and GGA (fix data) including altitude
   GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
@@ -88,8 +83,8 @@ void setup()
 
 void loop()
 {
-  float pressure = myPressure.readPressure();
-  float temperature = myPressure.readTemp();
+  float pressure = baro.getPressure();
+  float temperature = baro.getTemperature();
   // if a sentence is received, we can check the checksum, parse it...
   if (GPS.newNMEAreceived()) {
     // this also sets the newNMEAreceived() flag to false

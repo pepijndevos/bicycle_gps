@@ -1,8 +1,19 @@
+extern crate serialize;
+
 use std::cmp;
+
+use std::rand::{task_rng, Rng};
+use serialize::json;
 
 static DEGREE: uint = 32;
 
 #[deriving(Show)]
+enum InsertResult<T> {
+    Inserted(Node<T>),
+    Full(Node<T>, Node<T>),
+}
+
+#[deriving(Show, Rand, Encodable)]
 struct Rect {
     x0: int,
     y0: int,
@@ -10,13 +21,13 @@ struct Rect {
     y1: int,
 }
 
-#[deriving(Show)]
+#[deriving(Show, Encodable)]
 enum NodeData<T> {
     SubNodes(Vec<Node<T>>),
     Leaf(T),
 }
 
-#[deriving(Show)]
+#[deriving(Show, Encodable)]
 struct Node<T> {
     rect: Rect,
     sub: NodeData<T>,
@@ -73,35 +84,117 @@ impl<T> Node<T> {
         };
     }
 
-    fn split(&self) -> Vec<Node<T>> {
-        let ref rect = self.rect;
-        let hw = rect.width() / 2;
-        let hh = rect.height() / 2;
-        let rects = vec![
-            Rect { x0: rect.x0,    y0: rect.y0,    x1: rect.x0+hw, y1: rect.y0+hh, },
-            Rect { x0: rect.x0+hw, y0: rect.y0,    x1: rect.x1,    y1: rect.y0+hh, },
-            Rect { x0: rect.x0+hw, y0: rect.y0+hh, x1: rect.x1,    y1: rect.y1,    },
-            Rect { x0: rect.x0,    y0: rect.y0+hh, x1: rect.x0+hw, y1: rect.y1,    },
-        ];
-        return rects.iter().map(|r| Node { rect: *r, sub: SubNodes(Vec::new()) }).collect();
+    fn subnodes(&mut self) -> &mut Vec<Node<T>> {
+        return match self.sub {
+            Leaf(_) => fail!("leaf has no nodes"),
+            SubNodes(ref mut n) => n,
+        };
     }
 
-    fn insert(self, new: Node<T>) {
-        let subnodes = match self.sub {
-            Leaf(_) => fail!("dafuq"),
+    fn move_subnodes(self) -> Vec<Node<T>> {
+        return match self.sub {
+            Leaf(_) => fail!("leaf has no nodes"),
             SubNodes(n) => n,
         };
-        let has_subs = subnodes.iter().any(|n| !n.is_leaf());
+    }
+
+
+    fn insert(mut self, new: Node<T>) -> InsertResult<T> {
+        let has_subs = self.subnodes().iter().any(|n| !n.is_leaf());
+        let has_space = self.subnodes().len() < DEGREE;
+        let rect = self.rect.grow(new.rect);
         
-        if subnodes.len() < DEGREE {
+        if has_subs {
+            // ***************************
+            // There are subnodes, descend.
+            //println!("subs");
+            let node = {
+                let subnodes = self.subnodes();
+                let (index, _) = subnodes.iter().enumerate()
+                    .filter(|&(_, n)| !n.is_leaf())
+                    .min_by(|&(_, n)| n.rect.needed_growth(new.rect))
+                    .expect("no insertable subs");
+                //println!("best is {}", index);
+                subnodes.swap_remove(index).expect("no node to remove")
+            };
+            match node.insert(new) {
+                Inserted(newchild) => {
+                    // ***************************
+                    // Node inserted. Back out.
+                    //println!("inserted");
+                    let mut subnodes = self.move_subnodes();
+                    subnodes.push(newchild);
+                    return Inserted(Node {
+                        rect: rect,
+                        sub: SubNodes(subnodes),
+                    });
+                },
+                Full(node, new) => {
+                    // ***************************
+                    // Child full. Split.
+                    //println!("child full");
+                    let hw = rect.width() / 2;
+                    let hh = rect.height() / 2;
+                    let rects = vec![
+                        Rect { x0: rect.x0,    y0: rect.y0,    x1: rect.x0+hw, y1: rect.y0+hh, },
+                        Rect { x0: rect.x0+hw, y0: rect.y0,    x1: rect.x1,    y1: rect.y0+hh, },
+                        Rect { x0: rect.x0+hw, y0: rect.y0+hh, x1: rect.x1,    y1: rect.y1,    },
+                        Rect { x0: rect.x0,    y0: rect.y0+hh, x1: rect.x0+hw, y1: rect.y1,    },
+                    ];
+                    let newsubs: Vec<Node<T>> = rects.into_iter().map(|r| Node {
+                        rect: r,
+                        sub: SubNodes(Vec::with_capacity(DEGREE))
+                    }).collect();
+                    if newsubs.len() + self.subnodes().len() > DEGREE {
+                        self.subnodes().push(node);
+                        return Full(self, new);
+                    }
+                    for n in newsubs.into_iter() {
+                        self.subnodes().push(n);
+                    }
+                    let mut this = self;
+                    for n in node.move_subnodes().into_iter() {
+                        this = match this.insert(n) {
+                            Inserted(s) => s,
+                            Full(_, _) => fail!("could not insert split node"),
+                        }
+                    }
+                    return this.insert(new);
+                }
+            }
+        } else if has_space {
+            // ***************************
+            // Add the new node at this level
+            //println!("inserting");
+            let mut subnodes = self.move_subnodes();
+            subnodes.push(new);
+            return Inserted(Node {
+                rect: rect,
+                sub: SubNodes(subnodes),
+            });
         } else {
+            // ***************************
+            // This node is full
+            //println!("full");
+            return Full(self, new);
         }
     }
 }
 
 fn main() { 
-    let leafs = vec![Node::leaf(0,0,50,50, "aap"), Node::leaf(50,50,100,100, "noot")];
-    let root = Node::inter(0,0,100,100, leafs);
-    println!("Hello, world! {}", root)
-    root.insert(Node::leaf(25, 25, 75, 75, "mies"));
+    let leafs = vec![Node::inter(0,0,50,50, vec![]), Node::inter(50,50,100,100, vec![])];
+    let mut root = Node::inter(0,0,100,100, leafs);
+    let mut rng = task_rng();
+    for i in range(0u, 200) {
+        let mroot = root.insert(Node {
+            rect: rng.gen(),
+            sub: Leaf(i),
+        });
+        root = match mroot {
+            Inserted(root) => root,
+            Full(_, _) => fail!("full"),
+        };
+        //println!("#########################");
+    }
+    println!("{}", json::encode(&root));
 }

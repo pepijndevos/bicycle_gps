@@ -60,6 +60,17 @@ impl Rect {
             y1: cmp::max(self.y1, rect.y1),
         }
     }
+
+    fn split(&self) -> Vec<Rect> {
+        let hw = self.width() / 2;
+        let hh = self.height() / 2;
+        return vec![
+            Rect { x0: self.x0,    y0: self.y0,    x1: self.x0+hw, y1: self.y0+hh, },
+            Rect { x0: self.x0+hw, y0: self.y0,    x1: self.x1,    y1: self.y0+hh, },
+            Rect { x0: self.x0+hw, y0: self.y0+hh, x1: self.x1,    y1: self.y1,    },
+            Rect { x0: self.x0,    y0: self.y0+hh, x1: self.x0+hw, y1: self.y1,    },
+        ];
+    }
 }
 
 impl<T> Node<T> {
@@ -98,8 +109,7 @@ impl<T> Node<T> {
         };
     }
 
-
-    fn insert(mut self, new: Node<T>) -> InsertResult<T> {
+    fn insert_(mut self, new: Node<T>) -> InsertResult<T> {
         let has_subs = self.subnodes().iter().any(|n| !n.is_leaf());
         let has_space = self.subnodes().len() < DEGREE;
         let rect = self.rect.grow(new.rect);
@@ -107,21 +117,21 @@ impl<T> Node<T> {
         if has_subs {
             // ***************************
             // There are subnodes, descend.
-            //println!("subs");
+            println!("subs");
             let node = {
                 let subnodes = self.subnodes();
                 let (index, _) = subnodes.iter().enumerate()
                     .filter(|&(_, n)| !n.is_leaf())
                     .min_by(|&(_, n)| n.rect.needed_growth(new.rect))
                     .expect("no insertable subs");
-                //println!("best is {}", index);
+                println!("best is {}", index);
                 subnodes.swap_remove(index).expect("no node to remove")
             };
-            match node.insert(new) {
+            match node.insert_(new) {
                 Inserted(newchild) => {
                     // ***************************
                     // Node inserted. Back out.
-                    //println!("inserted");
+                    println!("inserted");
                     let mut subnodes = self.move_subnodes();
                     subnodes.push(newchild);
                     return Inserted(Node {
@@ -132,15 +142,8 @@ impl<T> Node<T> {
                 Full(node, new) => {
                     // ***************************
                     // Child full. Split.
-                    //println!("child full");
-                    let hw = rect.width() / 2;
-                    let hh = rect.height() / 2;
-                    let rects = vec![
-                        Rect { x0: rect.x0,    y0: rect.y0,    x1: rect.x0+hw, y1: rect.y0+hh, },
-                        Rect { x0: rect.x0+hw, y0: rect.y0,    x1: rect.x1,    y1: rect.y0+hh, },
-                        Rect { x0: rect.x0+hw, y0: rect.y0+hh, x1: rect.x1,    y1: rect.y1,    },
-                        Rect { x0: rect.x0,    y0: rect.y0+hh, x1: rect.x0+hw, y1: rect.y1,    },
-                    ];
+                    println!("child full");
+                    let rects = rect.split();
                     let newsubs: Vec<Node<T>> = rects.into_iter().map(|r| Node {
                         rect: r,
                         sub: SubNodes(Vec::with_capacity(DEGREE))
@@ -154,18 +157,18 @@ impl<T> Node<T> {
                     }
                     let mut this = self;
                     for n in node.move_subnodes().into_iter() {
-                        this = match this.insert(n) {
+                        this = match this.insert_(n) {
                             Inserted(s) => s,
                             Full(_, _) => fail!("could not insert split node"),
                         }
                     }
-                    return this.insert(new);
+                    return this.insert_(new);
                 }
             }
         } else if has_space {
             // ***************************
             // Add the new node at this level
-            //println!("inserting");
+            println!("inserting");
             let mut subnodes = self.move_subnodes();
             subnodes.push(new);
             return Inserted(Node {
@@ -175,26 +178,49 @@ impl<T> Node<T> {
         } else {
             // ***************************
             // This node is full
-            //println!("full");
+            println!("full");
             return Full(self, new);
+        }
+    }
+
+    fn insert(self, new: Node<T>) -> Node<T> {
+        match self.insert_(new) {
+            Inserted(node) => return node,
+            Full(mut node, new) => {
+                let mut newroot: Node<T> = Node {
+                    rect: node.rect,
+                    sub: SubNodes(Vec::with_capacity(DEGREE))
+                };
+                let rects = node.rect.split();
+                let newsubs: Vec<Node<T>> = rects.into_iter().map(|r| Node {
+                    rect: r,
+                    sub: SubNodes(Vec::with_capacity(DEGREE))
+                }).collect();
+                for n in newsubs.into_iter() {
+                    newroot.subnodes().push(n);
+                }
+                let mut this = newroot;
+                for n in node.move_subnodes().into_iter() {
+                    this = match this.insert_(n) {
+                        Inserted(s) => s,
+                        Full(_, _) => fail!("could NOT insert split node!!"),
+                    }
+                }
+                return this.insert(new);
+            }
         }
     }
 }
 
 fn main() { 
-    let leafs = vec![Node::inter(0,0,50,50, vec![]), Node::inter(50,50,100,100, vec![])];
-    let mut root = Node::inter(0,0,100,100, leafs);
+    let mut root = Node::inter(0,0,100,100, vec![]);
     let mut rng = task_rng();
-    for i in range(0u, 200) {
-        let mroot = root.insert(Node {
+    for i in range(0u, 10000) {
+        root = root.insert(Node {
             rect: rng.gen(),
             sub: Leaf(i),
         });
-        root = match mroot {
-            Inserted(root) => root,
-            Full(_, _) => fail!("full"),
-        };
-        //println!("#########################");
+        println!("#########################");
     }
     println!("{}", json::encode(&root));
 }

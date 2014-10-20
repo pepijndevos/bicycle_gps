@@ -1,9 +1,11 @@
+#![feature(slicing_syntax)]
 extern crate serialize;
 
 use std::cmp;
 use std::default::Default;
 
-use std::rand::{task_rng, Rng};
+use std::rand::{task_rng};
+use std::rand::distributions::{IndependentSample, Range};
 use serialize::json;
 
 static DEGREE: uint = 32;
@@ -22,13 +24,13 @@ struct Rect {
     y1: int,
 }
 
-#[deriving(Show, Encodable)]
+#[deriving(Show, Encodable, Clone)]
 enum NodeData<T> {
     SubNodes(Vec<Node<T>>),
     Leaf(T),
 }
 
-#[deriving(Show, Encodable)]
+#[deriving(Show, Encodable, Clone)]
 struct Node<T> {
     rect: Rect,
     sub: NodeData<T>,
@@ -43,15 +45,13 @@ impl Rect {
         return self.x1 - self.x0;
     }
 
-    fn needed_growth(&self, rect: Rect) -> int {
-        let north = cmp::max(0, self.y0 - rect.y0);
-        let east  = cmp::max(0, rect.x1 - self.x1);
-        let south = cmp::max(0, rect.y1 - self.y1);
-        let west  = cmp::max(0, self.x0 - rect.x0);
-        return (north + south) * self.height() + (east + west) * self.width();
+    fn needed_growth(&self, rect: &Rect) -> int {
+        let newrect = self.grow(rect);
+        let diff = (newrect.width() * newrect.height()) - (self.width() * self.height());
+        return cmp::max(0, diff);
     }
 
-    fn grow(&self, rect: Rect) -> Rect {
+    fn grow(&self, rect: &Rect) -> Rect {
         return Rect {
             x0: cmp::min(self.x0, rect.x0),
             y0: cmp::min(self.y0, rect.y0),
@@ -61,7 +61,7 @@ impl Rect {
     }
 }
 
-impl<T> Node<T> {
+impl<T: Clone> Node<T> {
 
     fn new(rect: Rect) -> Node<T> {
         return Node {
@@ -77,7 +77,14 @@ impl<T> Node<T> {
         };
     }
 
-    fn subnodes(&mut self) -> &mut Vec<Node<T>> {
+    fn subnodes(&self) -> &Vec<Node<T>> {
+        return match self.sub {
+            Leaf(_) => fail!("leaf has no nodes"),
+            SubNodes(ref n) => n,
+        };
+    }
+
+    fn mut_subnodes(&mut self) -> &mut Vec<Node<T>> {
         return match self.sub {
             Leaf(_) => fail!("leaf has no nodes"),
             SubNodes(ref mut n) => n,
@@ -91,46 +98,49 @@ impl<T> Node<T> {
         };
     }
 
-    fn split(mut self) -> (Node<T>, Node<T>) {
-        let mut sub1 = Node::new((*self.subnodes())[0].rect.clone());
-        let mut sub2 = Node::new((*self.subnodes())[1].rect.clone());
+    fn split(self) -> (Node<T>, Node<T>) {
+        let mut sub1 = Node::new(self.subnodes()[0].rect.clone());
+        let mut sub2 = Node::new(self.subnodes()[1].rect.clone());
         for n in self.move_subnodes().into_iter() {
-            if sub1.rect.needed_growth(n.rect) > sub2.rect.needed_growth(n.rect) {
-                sub2.rect = sub2.rect.grow(n.rect);
-                sub2.subnodes().push(n);
+            if sub1.rect.needed_growth(&n.rect) > sub2.rect.needed_growth(&n.rect) {
+                sub2.rect = sub2.rect.grow(&n.rect);
+                sub2.mut_subnodes().push(n);
             } else {
-                sub1.rect = sub1.rect.grow(n.rect);
-                sub1.subnodes().push(n);
+                sub1.rect = sub1.rect.grow(&n.rect);
+                sub1.mut_subnodes().push(n);
             }
         }
         return (sub1, sub2);
     }
 
-    fn insert_(mut self, new: Node<T>) -> InsertResult<T> {
+    fn best_node(&self, rect: &Rect) -> (uint, Node<T>) {
+        let (index, noderef) = self.subnodes().iter().enumerate()
+            .filter(|&(_, n)| !n.is_leaf())
+            .min_by(|&(_, n)| n.rect.needed_growth(rect))
+            .expect("no insertable subs");
+        let node = noderef.clone();
+        return (index, node);
+    }
+
+    fn insert_(self, new: Node<T>) -> InsertResult<T> {
         let has_subs = self.subnodes().iter().any(|n| !n.is_leaf());
         let has_space = self.subnodes().len() < DEGREE;
-        let rect = self.rect.grow(new.rect);
+        // the rect for this node after inserting new
+        let rect = self.rect.grow(&new.rect);
         
         if has_subs {
             // ***************************
             // There are subnodes, descend.
-            //println!("subs");
-            let node = {
-                let subnodes = self.subnodes();
-                let (index, _) = subnodes.iter().enumerate()
-                    .filter(|&(_, n)| !n.is_leaf())
-                    .min_by(|&(_, n)| n.rect.needed_growth(new.rect))
-                    .expect("no insertable subs");
-                //println!("best is {}", index);
-                subnodes.swap_remove(index).expect("no node to remove")
-            };
+            println!("subs");
+            let (index, node) = self.best_node(&new.rect);
+            println!("best is {} of {}", index, self.subnodes().len());
             match node.insert_(new) {
                 Inserted(newchild) => {
                     // ***************************
                     // Node inserted. Back out.
-                    //println!("inserted");
+                    println!("inserted");
                     let mut subnodes = self.move_subnodes();
-                    subnodes.push(newchild);
+                    subnodes[mut][index] = newchild;
                     return Inserted(Node {
                         rect: rect,
                         sub: SubNodes(subnodes),
@@ -139,22 +149,32 @@ impl<T> Node<T> {
                 Full(mut node, new) => {
                     // ***************************
                     // Child full. Split.
-                    //println!("child full");
-                    node.subnodes().push(new);
+                    println!("child full");
+                    // add new anyway, then split.
+                    node.mut_subnodes().push(new);
                     let (n1, n2) = node.split();
-                    self.subnodes().push(n1);
-                    if self.subnodes().len() < DEGREE {
-                        self.subnodes().push(n2);
-                        return Inserted(self);
+                    let mut subnodes = self.move_subnodes();
+                    subnodes[mut][index] = n1;
+                    if subnodes.len() < DEGREE {
+                        subnodes.push(n2);
+                        println!("inserted after split");
+                        return Inserted(Node {
+                            rect: rect,
+                            sub: SubNodes(subnodes),
+                        });
                     } else {
-                        return Full(self, n2);
+                        println!("full after split");
+                        return Full(Node {
+                            rect: rect,
+                            sub: SubNodes(subnodes),
+                        }, n2);
                     }
                 }
             }
         } else if has_space {
             // ***************************
             // Add the new node at this level
-            //println!("inserting");
+            println!("inserting");
             let mut subnodes = self.move_subnodes();
             subnodes.push(new);
             return Inserted(Node {
@@ -164,7 +184,7 @@ impl<T> Node<T> {
         } else {
             // ***************************
             // This node is full
-            //println!("full");
+            println!("full");
             return Full(self, new);
         }
     }
@@ -172,12 +192,15 @@ impl<T> Node<T> {
     fn insert(self, new: Node<T>) -> Node<T> {
         match self.insert_(new) {
             Inserted(node) => return node,
-            Full(node, new) => {
+            Full(mut node, new) => {
+                println!("root full");
                 let mut newroot: Node<T> = Node::new(node.rect);
+                // add new anyway, then split.
+                node.mut_subnodes().push(new);
                 let (n1, n2) = node.split();
-                newroot.subnodes().push(n1);
-                newroot.subnodes().push(n2);
-                return newroot.insert(new);
+                newroot.mut_subnodes().push(n1);
+                newroot.mut_subnodes().push(n2);
+                return newroot;
             }
         }
     }
@@ -185,18 +208,56 @@ impl<T> Node<T> {
 
 fn main() { 
     let mut root: Node<uint> = Node::new(Default::default());
+    let between = Range::new(-1000i, 1000i);
     let mut rng = task_rng();
     let mut i = 0u;
     while i < 10000 {
-        let r: Rect = rng.gen();
-        if r.x1 > r.x0 && r.y1 > r.y0 {
-            i = i + 1;
-            root = root.insert(Node {
-                rect: r,
-                sub: Leaf(i),
-            });
-            //println!("#########################");
-        }
+        let x = between.ind_sample(&mut rng);
+        let y = between.ind_sample(&mut rng);
+        let r = Rect { x0: x, y0: y, x1: x, y1: y, };
+        i = i + 1;
+        root = root.insert(Node {
+            rect: r,
+            sub: Leaf(i),
+        });
+        println!("#########################");
     }
     println!("{}", json::encode(&root));
+}
+
+#[test]
+fn needed_growth_test() {
+    let r1 = Rect { x0: 0, y0: 0, x1: 100, y1: 100, };
+    let r2 = Rect { x0: 0, y0: 0, x1: 100, y1: 101, };
+    let r3 = Rect { x0: 0, y0: 0, x1: 101, y1: 101, };
+    let r4 = Rect { x0: -1, y0: -1, x1: 101, y1: 101, };
+    assert_eq!(r1.needed_growth(&r2), 100);
+    assert_eq!(r1.needed_growth(&r3), 201);
+    assert_eq!(r1.needed_growth(&r4), 404);
+}
+
+#[test]
+fn grow_test() {
+    let r1 = Rect { x0: 0, y0: 0, x1: 100, y1: 100, };
+    let r2 = Rect { x0: 200, y0: 200, x1: 200, y1: 200, };
+    let g = r1.grow(&r2);
+    assert_eq!(g.x0, 0);
+    assert_eq!(g.y0, 0);
+    assert_eq!(g.x1, 200);
+    assert_eq!(g.y1, 200);
+}
+
+#[test]
+fn split_test() {
+    let root: Node<uint> = Node::new(Rect { x0: 0, y0: 0, x1: 100, y1: 100, });
+    let newroot = root.insert(Node {
+        rect: Rect { x0: 0, y0: 0, x1: 50, y1: 50, },
+        sub: Leaf(1),
+    }).insert(Node {
+        rect: Rect { x0: 50, y0: 50, x1: 100, y1: 100, },
+        sub: Leaf(1),
+    });
+    let (n1, n2) = newroot.split();
+    assert_eq!(n1.subnodes().len(), 1);
+    assert_eq!(n2.subnodes().len(), 1);
 }

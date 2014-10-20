@@ -131,14 +131,14 @@ impl<T: Clone> Node<T> {
         if has_subs {
             // ***************************
             // There are subnodes, descend.
-            println!("subs");
+            //println!("subs");
             let (index, node) = self.best_node(&new.rect);
-            println!("best is {} of {}", index, self.subnodes().len());
+            //println!("best is {} of {}", index, self.subnodes().len());
             match node.insert_(new) {
                 Inserted(newchild) => {
                     // ***************************
                     // Node inserted. Back out.
-                    println!("inserted");
+                    //println!("inserted");
                     let mut subnodes = self.move_subnodes();
                     subnodes[mut][index] = newchild;
                     return Inserted(Node {
@@ -149,7 +149,7 @@ impl<T: Clone> Node<T> {
                 Full(mut node, new) => {
                     // ***************************
                     // Child full. Split.
-                    println!("child full");
+                    //println!("child full");
                     // add new anyway, then split.
                     node.mut_subnodes().push(new);
                     let (n1, n2) = node.split();
@@ -157,13 +157,13 @@ impl<T: Clone> Node<T> {
                     subnodes[mut][index] = n1;
                     if subnodes.len() < DEGREE {
                         subnodes.push(n2);
-                        println!("inserted after split");
+                        //println!("inserted after split");
                         return Inserted(Node {
                             rect: rect,
                             sub: SubNodes(subnodes),
                         });
                     } else {
-                        println!("full after split");
+                        //println!("full after split");
                         return Full(Node {
                             rect: rect,
                             sub: SubNodes(subnodes),
@@ -174,7 +174,7 @@ impl<T: Clone> Node<T> {
         } else if has_space {
             // ***************************
             // Add the new node at this level
-            println!("inserting");
+            //println!("inserting");
             let mut subnodes = self.move_subnodes();
             subnodes.push(new);
             return Inserted(Node {
@@ -184,7 +184,7 @@ impl<T: Clone> Node<T> {
         } else {
             // ***************************
             // This node is full
-            println!("full");
+            //println!("full");
             return Full(self, new);
         }
     }
@@ -193,7 +193,7 @@ impl<T: Clone> Node<T> {
         match self.insert_(new) {
             Inserted(node) => return node,
             Full(mut node, new) => {
-                println!("root full");
+                //println!("root full");
                 let mut newroot: Node<T> = Node::new(node.rect);
                 // add new anyway, then split.
                 node.mut_subnodes().push(new);
@@ -208,19 +208,17 @@ impl<T: Clone> Node<T> {
 
 fn main() { 
     let mut root: Node<uint> = Node::new(Default::default());
-    let between = Range::new(-1000i, 1000i);
+    let between = Range::new(0, 995i);
     let mut rng = task_rng();
-    let mut i = 0u;
-    while i < 10000 {
+    for i in range(0u, 10000) {
         let x = between.ind_sample(&mut rng);
         let y = between.ind_sample(&mut rng);
-        let r = Rect { x0: x, y0: y, x1: x, y1: y, };
-        i = i + 1;
+        let r = Rect { x0: x, y0: y, x1: x+5, y1: y+5, };
         root = root.insert(Node {
             rect: r,
             sub: Leaf(i),
         });
-        println!("#########################");
+        //println!("#########################");
     }
     println!("{}", json::encode(&root));
 }

@@ -2,14 +2,8 @@ import sys
 import time
 import json
 import random
-import sqlite3
-import pygame
-pygame.init() 
-
-window = pygame.display.set_mode((1000, 1000)) 
-
-def scale(n):
-    return n
+import rtreeparse
+from PIL import Image, ImageDraw
 
 def color():
     return (
@@ -18,28 +12,24 @@ def color():
         random.randint(50, 255),
     )
 
-def draw(data):
-    rect = data['rect']
-    x0 = scale(rect['x0'])
-    y0 = scale(rect['y0'])
-    x1 = scale(rect['x1'])
-    y1 = scale(rect['y1'])
-    pygame.draw.rect(window, color(), (x0, y0, x1-x0, y1-y0), 1)
-    pygame.display.flip() 
+def draw(drawctx, data):
+    x0 = data.x0
+    y0 = data.y0
+    x1 = data.x1
+    y1 = data.y1
+    drawctx.rectangle((x0, y0, x1, y1), outline=color())
     try:
-        for d in data['sub']['fields'][0]:
-            draw(d)
-    except (TypeError):
+        for d in data.sub:
+            draw(drawctx, d)
+    except TypeError:
         pass
     
 
 def main(path):
-    window.fill((0, 0, 0))
-    pygame.display.flip() 
-    input()
-    draw(json.load(open(path)))
-
-
+    image = Image.new("RGB", (1000, 1000))
+    drawctx = ImageDraw.Draw(image)
+    draw(drawctx, rtreeparse.read(path))
+    image.save("output.png", "PNG")
 
 if __name__ == "__main__":
     main(*sys.argv[1:])

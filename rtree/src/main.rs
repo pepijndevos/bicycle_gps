@@ -3,6 +3,7 @@ extern crate serialize;
 
 use std::cmp;
 use std::default::Default;
+use std::io::{Seek, Writer, IoResult, File};
 
 use std::rand::{task_rng};
 use std::rand::distributions::{IndependentSample, Range};
@@ -61,7 +62,7 @@ impl Rect {
     }
 }
 
-impl<T: Clone> Node<T> {
+impl<T: Clone + TreeWriter> Node<T> {
 
     fn new(rect: Rect) -> Node<T> {
         return Node {
@@ -206,6 +207,48 @@ impl<T: Clone> Node<T> {
     }
 }
 
+trait TreeWriter {
+    fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek;
+}
+
+impl TreeWriter for uint {
+    fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
+        let offset = try!(w.tell());
+        try!(w.write_be_uint(*self));
+        return Ok(offset);
+    }
+}
+
+impl<T: TreeWriter>  TreeWriter for Node<T> {
+    fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
+        match self.sub {
+            Leaf(ref data) => {
+                let offset = try!(w.tell());
+                try!(w.write_u8(0)); // leaf node
+                try!(w.write_be_i32(self.rect.x0 as i32));
+                try!(w.write_be_i32(self.rect.y0 as i32));
+                try!(w.write_be_i32(self.rect.x1 as i32));
+                try!(w.write_be_i32(self.rect.y1 as i32));
+                try!(data.write(w));
+                return Ok(offset);
+            },
+            SubNodes(ref subs) => {
+                let offsets: Vec<u64> = subs.iter().filter_map(|sub| sub.write(w).ok()).collect();
+                let offset = try!(w.tell());
+                try!(w.write_u8(offsets.len() as u8));
+                try!(w.write_be_i32(self.rect.x0 as i32));
+                try!(w.write_be_i32(self.rect.y0 as i32));
+                try!(w.write_be_i32(self.rect.x1 as i32));
+                try!(w.write_be_i32(self.rect.y1 as i32));
+                for o in offsets.into_iter() {
+                    try!(w.write_be_u32(o as u32));
+                }
+                return Ok(offset);
+            },
+        }
+    }
+}
+
 fn main() { 
     let mut root: Node<uint> = Node::new(Default::default());
     let between = Range::new(-1000i, 1000i);
@@ -222,7 +265,8 @@ fn main() {
         });
         println!("#########################");
     }
-    println!("{}", json::encode(&root));
+    let ref mut f = File::create(&Path::new("data.bin")).ok().expect("no file");
+    root.write(f);
 }
 
 #[test]

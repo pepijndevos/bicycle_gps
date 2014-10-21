@@ -3,11 +3,10 @@ extern crate serialize;
 
 use std::cmp;
 use std::default::Default;
-use std::io::{Seek, Writer, IoResult, File};
+use std::io::{Seek, Writer, IoResult, File, SeekSet};
 
 use std::rand::{task_rng};
 use std::rand::distributions::{IndependentSample, Range};
-use serialize::json;
 
 static DEGREE: uint = 32;
 
@@ -17,7 +16,7 @@ enum InsertResult<T> {
     Full(Node<T>, Node<T>),
 }
 
-#[deriving(Show, Rand, Default, Encodable, Clone)]
+#[deriving(Show, Default, Clone)]
 struct Rect {
     x0: int,
     y0: int,
@@ -25,13 +24,13 @@ struct Rect {
     y1: int,
 }
 
-#[deriving(Show, Encodable, Clone)]
+#[deriving(Show, Clone)]
 enum NodeData<T> {
     SubNodes(Vec<Node<T>>),
     Leaf(T),
 }
 
-#[deriving(Show, Encodable, Clone)]
+#[deriving(Show, Clone)]
 struct Node<T> {
     rect: Rect,
     sub: NodeData<T>,
@@ -264,7 +263,10 @@ fn main() {
         //println!("#########################");
     }
     let ref mut f = File::create(&Path::new("data.bin")).ok().expect("no file");
-    root.write(f);
+    f.seek(4, SeekSet).ok().expect("seeking");
+    let start = root.write(f).ok().expect("error writing");
+    f.seek(0, SeekSet).ok().expect("seeking");
+    f.write_be_u32(start as u32).ok().expect("start");
 }
 
 #[test]

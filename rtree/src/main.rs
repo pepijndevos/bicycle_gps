@@ -61,7 +61,7 @@ impl Rect {
     }
 }
 
-impl<T: Clone + TreeWriter> Node<T> {
+impl<T: TreeWriter> Node<T> {
 
     fn new(rect: Rect) -> Node<T> {
         return Node {
@@ -113,16 +113,15 @@ impl<T: Clone + TreeWriter> Node<T> {
         return (sub1, sub2);
     }
 
-    fn best_node(&self, rect: &Rect) -> (uint, Node<T>) {
-        let (index, noderef) = self.subnodes().iter().enumerate()
+    fn best_node(&mut self, rect: &Rect) -> Node<T> {
+        let (index, _) = self.subnodes().iter().enumerate()
             .filter(|&(_, n)| !n.is_leaf())
             .min_by(|&(_, n)| n.rect.needed_growth(rect))
             .expect("no insertable subs");
-        let node = noderef.clone();
-        return (index, node);
+        return self.mut_subnodes().swap_remove(index).expect("node empty, huh?");
     }
 
-    fn insert_(self, new: Node<T>) -> InsertResult<T> {
+    fn insert_(mut self, new: Node<T>) -> InsertResult<T> {
         let has_subs = self.subnodes().iter().any(|n| !n.is_leaf());
         let has_space = self.subnodes().len() < DEGREE;
         // the rect for this node after inserting new
@@ -132,7 +131,7 @@ impl<T: Clone + TreeWriter> Node<T> {
             // ***************************
             // There are subnodes, descend.
             //println!("subs");
-            let (index, node) = self.best_node(&new.rect);
+            let node = self.best_node(&new.rect);
             //println!("best is {} of {}", index, self.subnodes().len());
             match node.insert_(new) {
                 Inserted(newchild) => {
@@ -140,7 +139,7 @@ impl<T: Clone + TreeWriter> Node<T> {
                     // Node inserted. Back out.
                     //println!("inserted");
                     let mut subnodes = self.move_subnodes();
-                    subnodes[mut][index] = newchild;
+                    subnodes.push(newchild);
                     return Inserted(Node {
                         rect: rect,
                         sub: SubNodes(subnodes),
@@ -154,7 +153,7 @@ impl<T: Clone + TreeWriter> Node<T> {
                     node.mut_subnodes().push(new);
                     let (n1, n2) = node.split();
                     let mut subnodes = self.move_subnodes();
-                    subnodes[mut][index] = n1;
+                    subnodes.push(n1); // we removed a node earlier
                     if subnodes.len() < DEGREE {
                         subnodes.push(n2);
                         //println!("inserted after split");
@@ -193,7 +192,7 @@ impl<T: Clone + TreeWriter> Node<T> {
         match self.insert_(new) {
             Inserted(node) => return node,
             Full(mut node, new) => {
-                //println!("root full");
+                println!("root full");
                 let mut newroot: Node<T> = Node::new(node.rect);
                 // add new anyway, then split.
                 node.mut_subnodes().push(new);
@@ -252,7 +251,7 @@ fn main() {
     let mut root: Node<uint> = Node::new(Default::default());
     let between = Range::new(0, 995i);
     let mut rng = task_rng();
-    for i in range(0u, 10000) {
+    for i in range(0u, 1492453) {
         let x = between.ind_sample(&mut rng);
         let y = between.ind_sample(&mut rng);
         let r = Rect { x0: x, y0: y, x1: x+5, y1: y+5, };
@@ -260,6 +259,9 @@ fn main() {
             rect: r,
             sub: Leaf(i),
         });
+        if i % 1000 == 0 {
+            println!("{}", i);
+        }
         //println!("#########################");
     }
     let ref mut f = File::create(&Path::new("data.bin")).ok().expect("no file");

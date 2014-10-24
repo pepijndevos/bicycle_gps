@@ -1,12 +1,11 @@
 #![feature(slicing_syntax)]
-extern crate serialize;
+extern crate postgres;
 
 use std::cmp;
 use std::default::Default;
 use std::io::{Seek, Writer, IoResult, File, SeekSet};
 
-use std::rand::{task_rng};
-use std::rand::distributions::{IndependentSample, Range};
+use postgres::{PostgresConnection, PostgresRow, PostgresStatement, NoSsl};
 
 static DEGREE: uint = 32;
 
@@ -16,7 +15,13 @@ enum InsertResult<T> {
     Full(Node<T>, Node<T>),
 }
 
-#[deriving(Show, Default, Clone)]
+#[deriving(Show, Clone, Default)]
+struct Point {
+    x: int,
+    y: int,
+}
+
+#[deriving(Show, Clone, Default)]
 struct Rect {
     x0: int,
     y0: int,
@@ -24,13 +29,13 @@ struct Rect {
     y1: int,
 }
 
-#[deriving(Show, Clone)]
+#[deriving(Show)]
 enum NodeData<T> {
     SubNodes(Vec<Node<T>>),
     Leaf(T),
 }
 
-#[deriving(Show, Clone)]
+#[deriving(Show)]
 struct Node<T> {
     rect: Rect,
     sub: NodeData<T>,
@@ -95,6 +100,13 @@ impl<T: TreeWriter> Node<T> {
         return match self.sub {
             Leaf(_) => fail!("leaf has no nodes"),
             SubNodes(n) => n,
+        };
+    }
+
+    fn mut_leaf(&mut self) -> &mut T {
+        return match self.sub {
+            Leaf(ref mut l) => l,
+            SubNodes(_) => fail!("Not a leaf"),
         };
     }
 
@@ -209,24 +221,33 @@ trait TreeWriter {
     fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek;
 }
 
-impl TreeWriter for uint {
+impl TreeWriter for Point {
     fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
         let offset = try!(w.tell());
-        try!(w.write_be_uint(*self));
+        try!(w.write_be_i32(self.x as i32));
+        try!(w.write_be_i32(self.y as i32));
         return Ok(offset);
     }
 }
 
-impl<T: TreeWriter>  TreeWriter for Node<T> {
+impl TreeWriter for Rect {
+    fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
+        let offset = try!(w.tell());
+        try!(w.write_be_i32(self.x0 as i32));
+        try!(w.write_be_i32(self.y0 as i32));
+        try!(w.write_be_i32(self.x1 as i32));
+        try!(w.write_be_i32(self.y1 as i32));
+        return Ok(offset);
+    }
+}
+
+impl<T: TreeWriter> TreeWriter for Node<T> {
     fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
         match self.sub {
             Leaf(ref data) => {
                 let offset = try!(w.tell());
                 try!(w.write_u8(0)); // leaf node
-                try!(w.write_be_i32(self.rect.x0 as i32));
-                try!(w.write_be_i32(self.rect.y0 as i32));
-                try!(w.write_be_i32(self.rect.x1 as i32));
-                try!(w.write_be_i32(self.rect.y1 as i32));
+                try!(self.rect.write(w));
                 try!(data.write(w));
                 return Ok(offset);
             },
@@ -234,10 +255,7 @@ impl<T: TreeWriter>  TreeWriter for Node<T> {
                 let offsets: Vec<u64> = subs.iter().filter_map(|sub| sub.write(w).ok()).collect();
                 let offset = try!(w.tell());
                 try!(w.write_u8(offsets.len() as u8));
-                try!(w.write_be_i32(self.rect.x0 as i32));
-                try!(w.write_be_i32(self.rect.y0 as i32));
-                try!(w.write_be_i32(self.rect.x1 as i32));
-                try!(w.write_be_i32(self.rect.y1 as i32));
+                try!(self.rect.write(w));
                 for o in offsets.into_iter() {
                     try!(w.write_be_u32(o as u32));
                 }
@@ -247,28 +265,83 @@ impl<T: TreeWriter>  TreeWriter for Node<T> {
     }
 }
 
+impl<T: TreeWriter> TreeWriter for Vec<T> {
+    fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
+        let offset = try!(w.tell());
+        try!(w.write_u8(self.len() as u8));
+        for o in self.iter() {
+            try!(o.write(w));
+        }
+        return Ok(offset);
+    }
+}
+
+fn query<'a>(conn: &'a PostgresConnection) -> PostgresStatement<'a> {
+    return conn.prepare("SELECT w.id,
+                                 ST_X(n.geom), ST_Y(n.geom),
+                                 ST_XMIN(w.bbox), ST_YMIN(w.bbox),
+                                 ST_XMAX(w.bbox), ST_YMAX(w.bbox)
+                          FROM nodes as n
+                          INNER JOIN way_nodes as wn ON n.id = wn.node_id
+                          INNER JOIN ways as w ON w.id = wn.way_id
+                          ORDER BY w.id, wn.sequence_id").unwrap();
+}
+
+fn get_fixedpoint(row: &PostgresRow, idx: uint) -> int {
+    let fl: f64 = row.get(idx);
+    return (fl * 10000000.0) as int;
+}
+
 fn main() { 
-    let mut root: Node<uint> = Node::new(Default::default());
-    let between = Range::new(0, 995i);
-    let mut rng = task_rng();
-    for i in range(0u, 1492453) {
-        let x = between.ind_sample(&mut rng);
-        let y = between.ind_sample(&mut rng);
-        let r = Rect { x0: x, y0: y, x1: x+5, y1: y+5, };
-        root = root.insert(Node {
-            rect: r,
-            sub: Leaf(i),
-        });
-        if i % 1000 == 0 {
-            println!("{}", i);
+    let conn = PostgresConnection::connect("postgres://postgres@localhost/osmosis", &NoSsl).unwrap();
+    let mut root: Node<Vec<Point>> = Node::new(Default::default());
+    let mut current_id: Option<i64> = None;
+    let mut current_node: Option<Node<Vec<Point>>> = None;
+    for row in query(&conn).query([]).unwrap() {
+        match current_id {
+            Some(i) if i == row.get(0u) => {
+                current_node = match current_node {
+                    Some(mut node) => {
+                        node.mut_leaf().push(Point {
+                            x: get_fixedpoint(&row, 1),
+                            y: get_fixedpoint(&row, 2),
+                        });
+                        Some(node)
+                    }
+                    None => None
+                }
+            }
+            _ => {
+                match current_node {
+                    Some(node) => {
+                        root = root.insert(node);
+                    }
+                    None => ()
+                }
+                current_id = Some(row.get(0u));
+                current_node = Some(Node {
+                    rect: Rect {
+                        x0: get_fixedpoint(&row, 3),
+                        y0: get_fixedpoint(&row, 4),
+                        x1: get_fixedpoint(&row, 5),
+                        y1: get_fixedpoint(&row, 6),
+                    },
+                    sub: Leaf(vec![Point {
+                        x: get_fixedpoint(&row, 1),
+                        y: get_fixedpoint(&row, 2),
+                    }]),
+                });
+            }
         }
         //println!("#########################");
+        let id: i64 = row.get(0u);
+        println!("{}", id);
     }
-    let ref mut f = File::create(&Path::new("data.bin")).ok().expect("no file");
-    f.seek(4, SeekSet).ok().expect("seeking");
-    let start = root.write(f).ok().expect("error writing");
-    f.seek(0, SeekSet).ok().expect("seeking");
-    f.write_be_u32(start as u32).ok().expect("start");
+    let ref mut f = File::create(&Path::new("data.bin")).unwrap();
+    f.seek(4, SeekSet).unwrap();
+    let start = root.write(f).unwrap();
+    f.seek(0, SeekSet).unwrap();
+    f.write_be_u32(start as u32).unwrap();
 }
 
 #[test]

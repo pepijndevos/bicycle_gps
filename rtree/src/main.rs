@@ -5,14 +5,14 @@ use std::cmp;
 use std::default::Default;
 use std::io::{Seek, Writer, IoResult, File, SeekSet};
 
-use postgres::{PostgresConnection, PostgresRow, PostgresStatement, NoSsl};
+use postgres::{PostgresConnection, PostgresRow, PostgresStatement, PostgresTransaction, NoSsl};
 
 static DEGREE: uint = 32;
 
 #[deriving(Show)]
 enum InsertResult<T> {
     Inserted(Node<T>),
-    Full(Node<T>, Node<T>),
+    Full(Node<T>, Vec<Node<T>>),
 }
 
 #[deriving(Show, Clone, Default)]
@@ -130,6 +130,7 @@ impl<T: TreeWriter> Node<T> {
             .filter(|&(_, n)| !n.is_leaf())
             .min_by(|&(_, n)| n.rect.needed_growth(rect))
             .expect("no insertable subs");
+        println!("best is {} of {}", index, self.subnodes().len());
         return self.mut_subnodes().swap_remove(index).expect("node empty, huh?");
     }
 
@@ -142,50 +143,44 @@ impl<T: TreeWriter> Node<T> {
         if has_subs {
             // ***************************
             // There are subnodes, descend.
-            //println!("subs");
+            println!("subs");
             let node = self.best_node(&new.rect);
-            //println!("best is {} of {}", index, self.subnodes().len());
             match node.insert_(new) {
                 Inserted(newchild) => {
                     // ***************************
                     // Node inserted. Back out.
-                    //println!("inserted");
-                    let mut subnodes = self.move_subnodes();
-                    subnodes.push(newchild);
-                    return Inserted(Node {
-                        rect: rect,
-                        sub: SubNodes(subnodes),
-                    });
+                    println!("inserted");
+                    self.mut_subnodes().push(newchild);
+                    return Inserted(self);
                 },
-                Full(mut node, new) => {
+                Full(node, mut new) => {
                     // ***************************
                     // Child full. Split.
-                    //println!("child full");
-                    // add new anyway, then split.
-                    node.mut_subnodes().push(new);
+                    println!("child full");
                     let (n1, n2) = node.split();
+                    new.push(n1);
+                    new.push(n2);
+                    let mut rect = self.rect;
                     let mut subnodes = self.move_subnodes();
-                    subnodes.push(n1); // we removed a node earlier
-                    if subnodes.len() < DEGREE {
-                        subnodes.push(n2);
-                        //println!("inserted after split");
-                        return Inserted(Node {
-                            rect: rect,
-                            sub: SubNodes(subnodes),
-                        });
-                    } else {
-                        //println!("full after split");
-                        return Full(Node {
-                            rect: rect,
-                            sub: SubNodes(subnodes),
-                        }, n2);
+                    let mut newnew = vec![];
+                    for nn in new.into_iter() {
+                        if subnodes.len() < DEGREE {
+                            rect = rect.grow(&nn.rect);
+                            subnodes.push(nn);
+                        } else {
+                            newnew.push(nn);
+                        }
                     }
+                    return Full(Node {
+                        rect: rect,
+                        sub: SubNodes(subnodes),
+                    }, newnew);
                 }
             }
         } else if has_space {
             // ***************************
             // Add the new node at this level
-            //println!("inserting");
+            println!("inserting");
             let mut subnodes = self.move_subnodes();
             subnodes.push(new);
             return Inserted(Node {
@@ -195,22 +190,22 @@ impl<T: TreeWriter> Node<T> {
         } else {
             // ***************************
             // This node is full
-            //println!("full");
-            return Full(self, new);
+            println!("full");
+            return Full(self, vec![new]);
         }
     }
 
     fn insert(self, new: Node<T>) -> Node<T> {
         match self.insert_(new) {
             Inserted(node) => return node,
-            Full(mut node, new) => {
+            Full(node, new) => {
                 println!("root full");
                 let mut newroot: Node<T> = Node::new(node.rect);
                 // add new anyway, then split.
-                node.mut_subnodes().push(new);
                 let (n1, n2) = node.split();
                 newroot.mut_subnodes().push(n1);
                 newroot.mut_subnodes().push(n2);
+                newroot.mut_subnodes().extend(new.into_iter());
                 return newroot;
             }
         }
@@ -276,7 +271,7 @@ impl<T: TreeWriter> TreeWriter for Vec<T> {
     }
 }
 
-fn query<'a>(conn: &'a PostgresConnection) -> PostgresStatement<'a> {
+fn query<'a>(conn: &'a PostgresTransaction) -> PostgresStatement<'a> {
     return conn.prepare("SELECT w.id,
                                  ST_X(n.geom), ST_Y(n.geom),
                                  ST_XMIN(w.bbox), ST_YMIN(w.bbox),
@@ -293,11 +288,13 @@ fn get_fixedpoint(row: &PostgresRow, idx: uint) -> int {
 }
 
 fn main() { 
-    let conn = PostgresConnection::connect("postgres://postgres@localhost/osmosis", &NoSsl).unwrap();
+    let conn = PostgresConnection::connect("postgres://pepijndevos@localhost/osm", &NoSsl).unwrap();
+    let trans = conn.transaction().unwrap();
     let mut root: Node<Vec<Point>> = Node::new(Default::default());
     let mut current_id: Option<i64> = None;
     let mut current_node: Option<Node<Vec<Point>>> = None;
-    for row in query(&conn).query([]).unwrap() {
+    for rrow in trans.lazy_query(&query(&trans), &[], 2000).unwrap() {
+        let row = rrow.unwrap();
         match current_id {
             Some(i) if i == row.get(0u) => {
                 current_node = match current_node {
@@ -333,9 +330,7 @@ fn main() {
                 });
             }
         }
-        //println!("#########################");
-        let id: i64 = row.get(0u);
-        println!("{}", id);
+        println!("#########################");
     }
     let ref mut f = File::create(&Path::new("data.bin")).unwrap();
     f.seek(4, SeekSet).unwrap();

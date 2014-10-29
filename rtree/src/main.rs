@@ -12,7 +12,7 @@ static DEGREE: uint = 32;
 #[deriving(Show)]
 enum InsertResult<T> {
     Inserted(Node<T>),
-    Full(Node<T>, Vec<Node<T>>),
+    Full(Node<T>, Node<T>),
 }
 
 #[deriving(Show, Clone, Default)]
@@ -125,6 +125,14 @@ impl<T: TreeWriter> Node<T> {
         return (sub1, sub2);
     }
 
+    fn update_rect(&mut self) {
+        let init: Option<Rect> = None;
+        self.rect = self.subnodes().iter().fold(init, |i, n| match i {
+            None => Some(n.rect),
+            Some(r) => Some(r.grow(&n.rect)),
+        }).unwrap();
+    }
+
     fn best_node(&mut self, rect: &Rect) -> Node<T> {
         let (index, _) = self.subnodes().iter().enumerate()
             .filter(|&(_, n)| !n.is_leaf())
@@ -137,8 +145,6 @@ impl<T: TreeWriter> Node<T> {
     fn insert_(mut self, new: Node<T>) -> InsertResult<T> {
         let has_subs = self.subnodes().iter().any(|n| !n.is_leaf());
         let has_space = self.subnodes().len() < DEGREE;
-        // the rect for this node after inserting new
-        let rect = self.rect.grow(&new.rect);
         
         if has_subs {
             // ***************************
@@ -151,61 +157,52 @@ impl<T: TreeWriter> Node<T> {
                     // Node inserted. Back out.
                     println!("inserted");
                     self.mut_subnodes().push(newchild);
+                    self.update_rect();
                     return Inserted(self);
                 },
-                Full(node, mut new) => {
+                Full(mut node, new) => {
                     // ***************************
                     // Child full. Split.
+                    // This is the tricky part.
                     println!("child full");
+                    node.mut_subnodes().push(new);
                     let (n1, n2) = node.split();
-                    new.push(n1);
-                    new.push(n2);
-                    let mut rect = self.rect;
-                    let mut subnodes = self.move_subnodes();
-                    let mut newnew = vec![];
-                    for nn in new.into_iter() {
-                        if subnodes.len() < DEGREE {
-                            rect = rect.grow(&nn.rect);
-                            subnodes.push(nn);
-                        } else {
-                            newnew.push(nn);
-                        }
+                    self.mut_subnodes().push(n1);
+                    if self.subnodes().len() < DEGREE {
+                        self.mut_subnodes().push(n2);
+                        self.update_rect();
+                        return Inserted(self);
+                    } else {
+                        self.update_rect();
+                        return Full(self, n2);
                     }
-                    return Full(Node {
-                        rect: rect,
-                        sub: SubNodes(subnodes),
-                    }, newnew);
                 }
             }
         } else if has_space {
             // ***************************
             // Add the new node at this level
             println!("inserting");
-            let mut subnodes = self.move_subnodes();
-            subnodes.push(new);
-            return Inserted(Node {
-                rect: rect,
-                sub: SubNodes(subnodes),
-            });
+            self.mut_subnodes().push(new);
+            self.update_rect();
+            return Inserted(self);
         } else {
             // ***************************
             // This node is full
             println!("full");
-            return Full(self, vec![new]);
+            return Full(self, new);
         }
     }
 
     fn insert(self, new: Node<T>) -> Node<T> {
         match self.insert_(new) {
             Inserted(node) => return node,
-            Full(node, new) => {
+            Full(mut node, new) => {
                 println!("root full");
                 let mut newroot: Node<T> = Node::new(node.rect);
-                // add new anyway, then split.
+                node.mut_subnodes().push(new);
                 let (n1, n2) = node.split();
                 newroot.mut_subnodes().push(n1);
                 newroot.mut_subnodes().push(n2);
-                newroot.mut_subnodes().extend(new.into_iter());
                 return newroot;
             }
         }

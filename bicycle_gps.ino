@@ -7,6 +7,8 @@
 #include "Adafruit_ILI9341.h"
 #include "Adafruit_GPS.h"
 #include "SoftwareSerial.h" // not used
+#include "types.h"
+
 
 // For the Adafruit shield, these are the default.
 #define TFT_DC 9

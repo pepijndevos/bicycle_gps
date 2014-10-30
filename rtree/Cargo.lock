@@ -2,7 +2,7 @@
 name = "rtree"
 version = "0.0.1"
 dependencies = [
- "postgres 0.0.0 (git+https://github.com/sfackler/rust-postgres#5dd09ce9c443ee86d3601ba638fa2c28ab4c4830)",
+ "postgres 0.0.0 (git+https://github.com/sfackler/rust-postgres)",
 ]
 
 [[package]]
@@ -15,7 +15,7 @@ name = "phf"
 version = "0.0.0"
 source = "git+https://github.com/sfackler/rust-phf#83a8116c71bf1cbf28d51d269b4c214e13748509"
 dependencies = [
- "xxhash 0.0.1 (git+https://github.com/Jurily/rust-xxhash#b1361187f6480f80551e49b248f61b8ccf6d2c53)",
+ "xxhash 0.0.1 (git+https://github.com/Jurily/rust-xxhash)",
 ]
 
 [[package]]
@@ -23,7 +23,7 @@ name = "phf_mac"
 version = "0.0.0"
 source = "git+https://github.com/sfackler/rust-phf#83a8116c71bf1cbf28d51d269b4c214e13748509"
 dependencies = [
- "xxhash 0.0.1 (git+https://github.com/Jurily/rust-xxhash#b1361187f6480f80551e49b248f61b8ccf6d2c53)",
+ "xxhash 0.0.1 (git+https://github.com/Jurily/rust-xxhash)",
 ]
 
 [[package]]
@@ -31,9 +31,9 @@ name = "postgres"
 version = "0.0.0"
 source = "git+https://github.com/sfackler/rust-postgres#5dd09ce9c443ee86d3601ba638fa2c28ab4c4830"
 dependencies = [
- "openssl 0.0.0 (git+https://github.com/sfackler/rust-openssl#b41201c3c9fddf42d02f71d11b5d4718eb9e88c4)",
- "phf 0.0.0 (git+https://github.com/sfackler/rust-phf#83a8116c71bf1cbf28d51d269b4c214e13748509)",
- "phf_mac 0.0.0 (git+https://github.com/sfackler/rust-phf#83a8116c71bf1cbf28d51d269b4c214e13748509)",
+ "openssl 0.0.0 (git+https://github.com/sfackler/rust-openssl)",
+ "phf 0.0.0 (git+https://github.com/sfackler/rust-phf)",
+ "phf_mac 0.0.0 (git+https://github.com/sfackler/rust-phf)",
 ]
 
 [[package]]

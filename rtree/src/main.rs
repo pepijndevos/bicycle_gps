@@ -229,7 +229,7 @@ impl<T: TreeWriter> Node<T> {
         match self.insert_(new) {
             Inserted(node) => return node,
             Full(mut node, new) => {
-                //println!("root full");
+                println!("root full");
                 let mut newroot: Node<T> = Node::new(node.rect);
                 node.mut_subnodes().push(new);
                 let [n1, n2] = node.split();
@@ -293,6 +293,7 @@ impl<T: TreeWriter> TreeWriter for Node<T> {
 impl<T: TreeWriter> TreeWriter for Vec<T> {
     fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
         let offset = try!(w.tell());
+        //println!("leaf lenght: {}", self.len() as i32);
         try!(w.write_le_i32(self.len() as i32));
         for o in self.iter() {
             try!(o.write(w));

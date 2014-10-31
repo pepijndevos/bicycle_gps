@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <math.h>
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
@@ -110,19 +111,24 @@ void loop()
   
   // printing stuff
   
-  tft.print("Pressure(Pa):");
+  /*tft.print("Pressure(Pa):");
   tft.println(pressure, 2);
   tft.print("Temp(c):");
   tft.println(temperature, 2);
-  tft.println();
+  tft.println();*/
   
   if (GPS.fix) {
+    Rect bounds = {.x0 = GPS.longitude_fixed - 150000,
+                   .y0 = GPS.latitude_fixed - 100000,
+                   .x1 = GPS.longitude_fixed + 150000,
+                   .y1 = GPS.latitude_fixed + 100000};
+    rtree_lookup(bounds);
     tft.println("Location:");
     tft.print(GPS.latitude_fixed/10000000.0, 4); tft.println(GPS.lat);
     tft.print(GPS.longitude_fixed/10000000.0, 4); tft.println(GPS.lon);
   }
   
-  tft.println();
+  /*tft.println();
 
   tft.print("Speed: ");
   tft.print(60000 / cycle_time);
@@ -134,8 +140,8 @@ void loop()
   tft.print("X: ");
   tft.print(x_centre - analogRead(JOYSTICK_X));
   tft.print(" Y: ");
-  tft.print(y_centre - analogRead(JOYSTICK_Y));  
-  delay(5000);
+  tft.print(y_centre - analogRead(JOYSTICK_Y));*/
+  delay(10000);
   tft.fillScreen(ILI9341_BLACK);
   tft.setCursor(0, 0);
 }

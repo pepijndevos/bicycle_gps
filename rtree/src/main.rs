@@ -9,7 +9,8 @@ use std::io::{Seek, Writer, IoResult, File, SeekSet};
 
 use postgres::{PostgresConnection, PostgresRow, PostgresStatement, PostgresTransaction, NoSsl};
 
-static DEGREE: uint = 32;
+// as much as you can fit in a 512 byte block
+static DEGREE: uint = 25;
 
 fn split_at<T>(mut left: Vec<T>, at: uint) -> (Vec<T>, Vec<T>) {
     if at >= left.len() {
@@ -266,23 +267,30 @@ impl TreeWriter for Rect {
     }
 }
 
+fn seek_block(w: &mut Seek) -> IoResult<u64> {
+    // seek forward to the nearest 512 bytes
+    let offset = try!(w.tell()) + 511 & !511;
+    assert!(offset % 512 == 0);
+    try!(w.seek(offset as i64, SeekSet));
+    return Ok(offset);
+}
+
 impl<T: TreeWriter> TreeWriter for Node<T> {
     fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
         match self.sub {
             Leaf(ref data) => {
-                let offset = try!(w.tell());
+                let offset = try!(seek_block(w));
                 try!(w.write_le_i32(0)); // leaf node
-                try!(self.rect.write(w));
                 try!(data.write(w));
                 return Ok(offset);
             },
             SubNodes(ref subs) => {
                 let offsets: Vec<u64> = subs.iter().filter_map(|sub| sub.write(w).ok()).collect();
-                let offset = try!(w.tell());
+                let offset = try!(seek_block(w));
                 try!(w.write_le_i32(offsets.len() as i32));
-                try!(self.rect.write(w));
-                for o in offsets.into_iter() {
+                for (o, sub) in offsets.into_iter().zip(subs.iter()) {
                     try!(w.write_le_i32(o as i32));
+                    try!(sub.rect.write(w));
                 }
                 return Ok(offset);
             },

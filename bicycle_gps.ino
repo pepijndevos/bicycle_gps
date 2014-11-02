@@ -2,11 +2,12 @@
 #include <math.h>
 #include <Wire.h>
 #include <SPI.h>
-#include <SD.h>
-#include <Adafruit_MPL3115A2.h>
+//#include <SD.h>
+#include "Adafruit_MPL3115A2.h"
 #include "Adafruit_GFX.h"
 #include "Adafruit_ILI9341.h"
 #include "Adafruit_GPS.h"
+#include "MemoryFree.h"
 #include "SoftwareSerial.h" // not used
 #include "types.h"
 
@@ -86,6 +87,8 @@ void setup()
 
 void loop()
 {
+  Serial.print("freeMemory()=");
+  Serial.println(freeMemory());
   float pressure = baro.getPressure();
   float temperature = baro.getTemperature();
   // if a sentence is received, we can check the checksum, parse it...
@@ -118,7 +121,8 @@ void loop()
   tft.println();*/
   
   if (GPS.fix) {
-    Rect bounds = {.x0 = GPS.longitude_fixed - 150000,
+    Rect bounds = {.sub = 0,
+                   .x0 = GPS.longitude_fixed - 150000,
                    .y0 = GPS.latitude_fixed - 100000,
                    .x1 = GPS.longitude_fixed + 150000,
                    .y1 = GPS.latitude_fixed + 100000};

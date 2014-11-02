@@ -275,12 +275,12 @@ fn seek_block(w: &mut Seek) -> IoResult<u64> {
     return Ok(offset);
 }
 
-impl<T: TreeWriter> TreeWriter for Node<T> {
+impl<T: TreeWriter> TreeWriter for Node<Vec<T>> {
     fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
         match self.sub {
             Leaf(ref data) => {
                 let offset = try!(seek_block(w));
-                try!(w.write_le_i32(0)); // leaf node
+                try!(w.write_le_i32(-(data.len() as i32))); // leaf node
                 try!(data.write(w));
                 return Ok(offset);
             },
@@ -301,8 +301,6 @@ impl<T: TreeWriter> TreeWriter for Node<T> {
 impl<T: TreeWriter> TreeWriter for Vec<T> {
     fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
         let offset = try!(w.tell());
-        //println!("leaf lenght: {}", self.len() as i32);
-        try!(w.write_le_i32(self.len() as i32));
         for o in self.iter() {
             try!(o.write(w));
         }

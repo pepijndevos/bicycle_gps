@@ -36,6 +36,7 @@ volatile unsigned long cycle_time;
 
 // joystick center
 int x_centre, y_centre;
+double zoom = 30000;
 
 // file system
 SdFat sd;
@@ -87,7 +88,7 @@ void setup()
   x_centre = analogRead(JOYSTICK_X);
   y_centre = analogRead(JOYSTICK_Y);
 
-  tft.setTextSize(2);
+  tft.setTextSize(1);
   tft.fillScreen(ILI9341_BLACK);
   tft.setRotation(1);
   tft.setTextColor(ILI9341_WHITE);
@@ -120,42 +121,61 @@ void loop()
     dataFile.close();
   }*/
   
-  // printing stuff
-  
-  /*tft.print("Pressure(Pa):");
-  tft.println(pressure, 2);
-  tft.print("Temp(c):");
-  tft.println(temperature, 2);
-  tft.println();*/
-  
   if (GPS.fix) {
+    // this is not correct
+    double lat_zoom = zoom / ((double)tft.width() / tft.height());
+    double lon_zoom = zoom / lon_scale(GPS.latitude_fixed);
+    Serial.println(lon_scale(GPS.latitude_fixed));
+    Serial.println((double)tft.width() / tft.height());
+    
     Rect bounds = {.sub = 0,
-                   .x0 = GPS.longitude_fixed - 150000,
-                   .y0 = GPS.latitude_fixed - 100000,
-                   .x1 = GPS.longitude_fixed + 150000,
-                   .y1 = GPS.latitude_fixed + 100000};
+                   .x0 = GPS.longitude_fixed - lon_zoom,
+                   .y0 = GPS.latitude_fixed - zoom,
+                   .x1 = GPS.longitude_fixed + lon_zoom,
+                   .y1 = GPS.latitude_fixed + zoom};
     rtree_lookup(bounds);
-    tft.println("Location:");
-    tft.print(GPS.latitude_fixed/10000000.0, 4); tft.println(GPS.lat);
-    tft.print(GPS.longitude_fixed/10000000.0, 4); tft.println(GPS.lon);
+    tft.fillCircle(tft.width()/2, tft.height()/2, 4, ILI9341_BLUE);
   }
   
-  /*tft.println();
-
-  tft.print("Speed: ");
+  tft.print(pressure, 2);
+  tft.println(" Pa");
+  tft.print(temperature, 2);
+  tft.println(" C");
   tft.print(60000 / cycle_time);
-  tft.println("RPM");
-  
-  tft.println();
+  tft.println(" RPM");
 
-  tft.println("Joystick:");
+  tft.setTextSize(3);
+  tft.setCursor(100, 200);
+  tft.print(GPS.speed, 2);
+    tft.println(" Km/h");
+
+  unsigned long time = millis() + 10000;
+  while (millis() < time) {
+    int y = y_centre - analogRead(JOYSTICK_Y);
+    if (y > 20) {
+      zoom *= 1.2;
+      break;
+    } else if (y < -20) {
+      zoom *= 0.8;
+      break;
+    }
+  }
+  /*tft.println("Joystick:");
   tft.print("X: ");
   tft.print(x_centre - analogRead(JOYSTICK_X));
   tft.print(" Y: ");
   tft.print(y_centre - analogRead(JOYSTICK_Y));*/
-  delay(10000);
   tft.fillScreen(ILI9341_BLACK);
   tft.setCursor(0, 0);
+  tft.setTextSize(1);
+}
+
+//radians = (degrees * 71) / 4068
+//degrees = (radians * 4068) / 71
+double lon_scale(int32_t lat) {
+  double dlat = lat / 10000000.0;
+  double rad = dlat * 0.0174532925;
+  return cos(rad);
 }
 
 // Interrupt is called once a millisecond, looks for any new GPS data, and stores it

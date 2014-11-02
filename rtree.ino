@@ -25,7 +25,6 @@ void draw_points(File f, Node* n, Point origin, int xscale, int yscale) {
   //-----+--------------------
   // 784 | 4.8219990810608790
   int len = abs(n->len) - 1; // minus last node
-  Serial.println(len);
   int nodelen = (len < (int)(DEGREE*2.5) ? len : (int)(DEGREE*2.5));
   for (int i = 0; i<nodelen; i++) {
     draw_line(origin, xscale, yscale,
@@ -38,21 +37,14 @@ void draw_points(File f, Node* n, Point origin, int xscale, int yscale) {
 
 
 void inner_lookup(File datafile, Rect bounds, int32_t index) {
-  Serial.println("Reading");
-  unsigned long time = millis();
   datafile.seek(index);
-  Serial.println(millis() - time);
-  time = millis();
   // The SD card has 512 byte blocks.
   // By reading 512 bytes at a time,
   // we avoid buffering and copying in SdFatLib.
   NodeBuffer nb;
   datafile.read(&nb.buf, 512);
-  Serial.println(millis() - time);
-  time = millis();
   
   if (nb.n.len < 0) {
-    Serial.println("reached leaf");
     Point origin = {.x = bounds.x0, .y = bounds.y0};
     draw_points(datafile, &nb.n, origin, 1000, 1000);
     return;
@@ -73,7 +65,6 @@ void rtree_lookup(Rect bounds) {
   }
   int32_t index;
   datafile.read(&index, sizeof(index));
-  Serial.println(index);
   
   inner_lookup(datafile, bounds, index);
   

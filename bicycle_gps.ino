@@ -2,7 +2,7 @@
 #include <math.h>
 #include <Wire.h>
 #include <SPI.h>
-//#include <SD.h>
+#include <SD.h>
 #include "Adafruit_MPL3115A2.h"
 #include "Adafruit_GFX.h"
 #include "Adafruit_ILI9341.h"

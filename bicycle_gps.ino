@@ -2,7 +2,7 @@
 #include <math.h>
 #include <Wire.h>
 #include <SPI.h>
-#include <SD.h>
+#include <SdFat.h>
 #include "Adafruit_MPL3115A2.h"
 #include "Adafruit_GFX.h"
 #include "Adafruit_ILI9341.h"
@@ -37,6 +37,13 @@ volatile unsigned long cycle_time;
 // joystick center
 int x_centre, y_centre;
 
+// file system
+SdFat sd;
+// test file
+SdFile file;
+// file extent
+uint32_t bgnBlock, endBlock;
+
 void setup()
 {
   Wire.begin();       // Join i2c bus
@@ -44,7 +51,8 @@ void setup()
   baro.begin();       // Get sensor online
   tft.begin();        // Start TFT
   GPS.begin(9600);    // Start GPS
-  SD.begin(SD_CS);     // Mount SD card
+  // Mount SD card
+  if (!sd.begin(SD_CS, SPI_FULL_SPEED)) sd.initErrorHalt();
  
   // uncomment this line to turn on RMC (recommended minimum) and GGA (fix data) including altitude
   GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
@@ -98,7 +106,7 @@ void loop()
   }
   
   // logging stuff
-  
+  /*
   char filename[13];
   snprintf(filename, 13, "%d-%d-%d.log", GPS.year, GPS.month, GPS.day);
   File dataFile = SD.open(filename, FILE_WRITE);
@@ -110,7 +118,7 @@ void loop()
     pressure + "," + temperature + "," + cycle_time
     );
     dataFile.close();
-  }
+  }*/
   
   // printing stuff
   

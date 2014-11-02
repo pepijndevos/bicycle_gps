@@ -16,7 +16,7 @@ void draw_line(Point origin, int xscale, int yscale, int32_t x0, int32_t y0, int
   tft.drawLine(x0, y0, x1, y1, ILI9341_RED);
 }
 
-void draw_points(File f, Node* n, Point origin, int xscale, int yscale) {
+void draw_points(Node* n, Point origin, int xscale, int yscale) {
   // WARNIG: fence poles ahead.
   // the first points are in the node,
   // this means we can satisfy most without aditional reads
@@ -36,37 +36,37 @@ void draw_points(File f, Node* n, Point origin, int xscale, int yscale) {
 }
 
 
-void inner_lookup(File datafile, Rect bounds, int32_t index) {
-  datafile.seek(index);
-  // The SD card has 512 byte blocks.
-  // By reading 512 bytes at a time,
-  // we avoid buffering and copying in SdFatLib.
+void inner_lookup(Rect bounds, int32_t index) {
   NodeBuffer nb;
-  datafile.read(&nb.buf, 512);
+  sd.card()->readBlock(bgnBlock + (index / 512), nb.buf);
   
   if (nb.n.len < 0) {
     Point origin = {.x = bounds.x0, .y = bounds.y0};
-    draw_points(datafile, &nb.n, origin, 1000, 1000);
+    draw_points(&nb.n, origin, 1000, 1000);
     return;
   }
-  Serial.println(nb.n.len);
   for (int i=0; i<nb.n.len; i++) {
     if (overlap(nb.n.sub.nodes[i], bounds)) {
-      inner_lookup(datafile, bounds, nb.n.sub.nodes[i].sub);
+      inner_lookup(bounds, nb.n.sub.nodes[i].sub);
     }
   }
 }
 
 void rtree_lookup(Rect bounds) {
-  File datafile = SD.open("data.bin");
-  if (!datafile) {
+  if (!file.open(sd.vwd(), "data.bin", O_READ)) {
     Serial.println("No data file");
     return;
   }
+  // get the location of the file's blocks
+  if (!file.contiguousRange(&bgnBlock, &endBlock)) {
+    Serial.println("File not contiguous");
+    return;
+  }
+
   int32_t index;
-  datafile.read(&index, sizeof(index));
+  file.read(&index, sizeof(index));
   
-  inner_lookup(datafile, bounds, index);
+  inner_lookup(bounds, index);
   
-  datafile.close();
+  file.close();
 }

@@ -153,10 +153,10 @@ void loop()
   while (millis() < time) {
     int y = y_centre - analogRead(JOYSTICK_Y);
     if (y > 20) {
-      zoom *= 1.2;
+      zoom *= 0.8;
       break;
     } else if (y < -20) {
-      zoom *= 0.8;
+      zoom *= 1.3;
       break;
     }
   }

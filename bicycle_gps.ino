@@ -146,7 +146,7 @@ void loop()
 
   tft.setTextSize(3);
   tft.setCursor(100, 200);
-  tft.print(GPS.speed, 2);
+  tft.print(GPS.speed * 1.852, 2);
     tft.println(" Km/h");
 
   unsigned long time = millis() + 10000;

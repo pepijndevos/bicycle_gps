@@ -7,14 +7,14 @@ use std::cmp;
 use std::default::Default;
 use std::io::{Seek, Writer, IoResult, File, SeekSet};
 
-use postgres::{PostgresConnection, PostgresRow, PostgresStatement, PostgresTransaction, NoSsl};
+use postgres::{Connection, Row, Statement, Transaction, NoSsl};
 
 // as much as you can fit in a 512 byte block
 static DEGREE: uint = 25;
 
 fn split_at<T>(mut left: Vec<T>, at: uint) -> (Vec<T>, Vec<T>) {
     if at >= left.len() {
-        fail!("eh?!");
+        panic!("eh?!");
     }
  
     let right_len = left.len() - at;
@@ -111,21 +111,21 @@ impl<T: TreeWriter> Node<T> {
 
     fn subnodes(&self) -> &Vec<Node<T>> {
         return match self.sub {
-            Leaf(_) => fail!("leaf has no nodes"),
+            Leaf(_) => panic!("leaf has no nodes"),
             SubNodes(ref n) => n,
         };
     }
 
     fn mut_subnodes(&mut self) -> &mut Vec<Node<T>> {
         return match self.sub {
-            Leaf(_) => fail!("leaf has no nodes"),
+            Leaf(_) => panic!("leaf has no nodes"),
             SubNodes(ref mut n) => n,
         };
     }
 
     fn move_subnodes(self) -> Vec<Node<T>> {
         return match self.sub {
-            Leaf(_) => fail!("leaf has no nodes"),
+            Leaf(_) => panic!("leaf has no nodes"),
             SubNodes(n) => n,
         };
     }
@@ -133,7 +133,7 @@ impl<T: TreeWriter> Node<T> {
     fn mut_leaf(&mut self) -> &mut T {
         return match self.sub {
             Leaf(ref mut l) => l,
-            SubNodes(_) => fail!("Not a leaf"),
+            SubNodes(_) => panic!("Not a leaf"),
         };
     }
 
@@ -308,24 +308,25 @@ impl<T: TreeWriter> TreeWriter for Vec<T> {
     }
 }
 
-fn query<'a>(conn: &'a PostgresTransaction) -> PostgresStatement<'a> {
+fn query<'a>(conn: &'a Transaction) -> Statement<'a> {
     return conn.prepare("SELECT w.id,
                                  ST_X(n.geom), ST_Y(n.geom),
                                  ST_XMIN(w.bbox), ST_YMIN(w.bbox),
-                                 ST_XMAX(w.bbox), ST_YMAX(w.bbox)
+                                 ST_XMAX(w.bbox), ST_YMAX(w.bbox),
+                                 HSTORE_TO_JSON(tags)
                           FROM nodes as n
                           INNER JOIN way_nodes as wn ON n.id = wn.node_id
                           INNER JOIN ways as w ON w.id = wn.way_id
                           ORDER BY w.id, wn.sequence_id").unwrap();
 }
 
-fn get_fixedpoint(row: &PostgresRow, idx: uint) -> int {
+fn get_fixedpoint(row: &Row, idx: uint) -> int {
     let fl: f64 = row.get(idx);
     return (fl * 10000000.0) as int;
 }
 
 fn main() { 
-    let conn = PostgresConnection::connect("postgres://pepijndevos@localhost/osm", &NoSsl).unwrap();
+    let conn = Connection::connect("postgres://pepijndevos@localhost/osm", &NoSsl).unwrap();
     let trans = conn.transaction().unwrap();
     let mut root: Node<Vec<Point>> = Node::new(Default::default());
     let mut current_id: Option<i64> = None;

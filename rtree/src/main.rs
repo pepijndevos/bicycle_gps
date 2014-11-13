@@ -1,7 +1,9 @@
 #![feature(slicing_syntax)]
 extern crate postgres;
 extern crate libc;
- 
+extern crate serialize;
+
+use serialize::json;
 use libc::c_void;
 use std::cmp;
 use std::default::Default;
@@ -59,6 +61,21 @@ enum NodeData<T> {
 struct Node<T> {
     rect: Rect,
     sub: NodeData<T>,
+}
+
+bitflags! {
+    flags WayFlags: u8 {
+        const VANILLA  = 0x00,
+        const FRIENDLY = 0x01,
+        const HOSTILE  = 0x02,
+        const ROUTE    = 0x04,
+    }
+}
+
+struct Way {
+    flags: WayFlags,
+    name: String,
+    nodes: Vec<Point>,
 }
 
 impl Rect {
@@ -275,21 +292,21 @@ fn seek_block(w: &mut Seek) -> IoResult<u64> {
     return Ok(offset);
 }
 
-impl<T: TreeWriter> TreeWriter for Node<Vec<T>> {
+impl TreeWriter for Node<Way> {
     fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
         match self.sub {
             Leaf(ref data) => {
                 let offset = try!(seek_block(w));
-                try!(w.write_le_i32(-(data.len() as i32))); // leaf node
+                try!(w.write_u8(0)); // leaf node
                 try!(data.write(w));
                 return Ok(offset);
             },
             SubNodes(ref subs) => {
                 let offsets: Vec<u64> = subs.iter().filter_map(|sub| sub.write(w).ok()).collect();
                 let offset = try!(seek_block(w));
-                try!(w.write_le_i32(offsets.len() as i32));
+                try!(w.write_u8(offsets.len() as u8));
                 for (o, sub) in offsets.into_iter().zip(subs.iter()) {
-                    try!(w.write_le_i32(o as i32));
+                    try!(w.write_le_u32(o as u32));
                     try!(sub.rect.write(w));
                 }
                 return Ok(offset);
@@ -298,10 +315,14 @@ impl<T: TreeWriter> TreeWriter for Node<Vec<T>> {
     }
 }
 
-impl<T: TreeWriter> TreeWriter for Vec<T> {
+impl TreeWriter for Way {
     fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
         let offset = try!(w.tell());
-        for o in self.iter() {
+        try!(w.write_le_u16(self.nodes.len() as u16));
+        try!(w.write_u8(self.name.len() as u8));
+        try!(w.write_u8(self.flags.bits()));
+
+        for o in self.nodes.iter() {
             try!(o.write(w));
         }
         return Ok(offset);
@@ -310,14 +331,14 @@ impl<T: TreeWriter> TreeWriter for Vec<T> {
 
 fn query<'a>(conn: &'a Transaction) -> Statement<'a> {
     return conn.prepare("SELECT w.id,
-                                 ST_X(n.geom), ST_Y(n.geom),
-                                 ST_XMIN(w.bbox), ST_YMIN(w.bbox),
-                                 ST_XMAX(w.bbox), ST_YMAX(w.bbox),
-                                 HSTORE_TO_JSON(tags)
-                          FROM nodes as n
-                          INNER JOIN way_nodes as wn ON n.id = wn.node_id
-                          INNER JOIN ways as w ON w.id = wn.way_id
-                          ORDER BY w.id, wn.sequence_id").unwrap();
+                                ST_X(n.geom), ST_Y(n.geom),
+                                ST_XMIN(w.bbox), ST_YMIN(w.bbox),
+                                ST_XMAX(w.bbox), ST_YMAX(w.bbox),
+                                HSTORE_TO_JSON(w.tags)
+                         FROM way_nodes as wn
+                         INNER JOIN nodes as n ON n.id = wn.node_id
+                         INNER JOIN ways as w ON w.id = wn.way_id
+                         ORDER BY wn.way_id, wn.sequence_id").unwrap();
 }
 
 fn get_fixedpoint(row: &Row, idx: uint) -> int {
@@ -325,19 +346,55 @@ fn get_fixedpoint(row: &Row, idx: uint) -> int {
     return (fl * 10000000.0) as int;
 }
 
+fn parse_hstore(row: &Row) -> (String, WayFlags) {
+    let text = row.get(7);
+    let data = match text {
+        Some(json::Object(m)) => m,
+        _ => panic!("No JSON in hstore"),
+    };
+
+    let name = match data.get(&String::from_str("name")) {
+        Some(&json::String(ref s)) => s.clone(),
+        _ => String::new(),
+    };
+    let highway = match data.get(&String::from_str("highway")) {
+        Some(&json::String(ref s)) if s.as_slice() == "motorway" => HOSTILE,
+        Some(&json::String(ref s)) if s.as_slice() == "trunk" => HOSTILE,
+        Some(&json::String(ref s)) if s.as_slice() == "primary" => HOSTILE,
+        Some(&json::String(ref s)) if s.as_slice() == "residential" => FRIENDLY,
+        Some(&json::String(ref s)) if s.as_slice() == "cycleway" => FRIENDLY,
+        _ => VANILLA,
+    };
+    let bicycle = match data.get(&String::from_str("bicycle")) {
+        Some(&json::String(ref s)) if s.as_slice() == "no" => HOSTILE,
+        Some(&json::String(ref s)) if s.as_slice() == "yes" => FRIENDLY,
+        Some(&json::String(ref s)) if s.as_slice() == "designated" => FRIENDLY,
+        _ => VANILLA,
+    };
+    let cycleway = match data.get(&String::from_str("cycleway")) {
+        Some(_) => FRIENDLY,
+        _ => VANILLA,
+    };
+    let bicycle_road = match data.get(&String::from_str("bicycle_road")) {
+        Some(_) => FRIENDLY,
+        _ => VANILLA,
+    };
+    return (name, highway | cycleway | bicycle | bicycle_road )
+}
+
 fn main() { 
     let conn = Connection::connect("postgres://pepijndevos@localhost/osm", &NoSsl).unwrap();
     let trans = conn.transaction().unwrap();
-    let mut root: Node<Vec<Point>> = Node::new(Default::default());
+    let mut root: Node<Way> = Node::new(Default::default());
     let mut current_id: Option<i64> = None;
-    let mut current_node: Option<Node<Vec<Point>>> = None;
+    let mut current_node: Option<Node<Way>> = None;
     for rrow in trans.lazy_query(&query(&trans), &[], 2000).unwrap() {
         let row = rrow.unwrap();
         match current_id {
             Some(i) if i == row.get(0u) => {
                 current_node = match current_node {
                     Some(mut node) => {
-                        node.mut_leaf().push(Point {
+                        node.mut_leaf().nodes.push(Point {
                             x: get_fixedpoint(&row, 1),
                             y: get_fixedpoint(&row, 2),
                         });
@@ -354,6 +411,7 @@ fn main() {
                     }
                     None => ()
                 }
+                let (name, flags) = parse_hstore(&row);
                 current_id = Some(row.get(0u));
                 current_node = Some(Node {
                     rect: Rect {
@@ -362,10 +420,16 @@ fn main() {
                         x1: get_fixedpoint(&row, 5),
                         y1: get_fixedpoint(&row, 6),
                     },
-                    sub: Leaf(vec![Point {
-                        x: get_fixedpoint(&row, 1),
-                        y: get_fixedpoint(&row, 2),
-                    }]),
+                    sub: Leaf(Way {
+                        flags: flags,
+                        name: name,
+                        nodes: vec![
+                            Point {
+                                x: get_fixedpoint(&row, 1),
+                                y: get_fixedpoint(&row, 2),
+                            }
+                        ]
+                    }),
                 });
             }
         }

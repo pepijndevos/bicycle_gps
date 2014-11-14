@@ -139,6 +139,9 @@ void loop()
     tft.fillCircle(tft.width()/2, tft.height()/2, 4, ILI9341_BLUE);
   }
   
+  tft.setCursor(0, 0);
+  tft.setTextSize(1);
+  tft.setTextColor(ILI9341_WHITE);
   tft.print(pressure, 2);
   tft.println(" Pa");
   tft.print(temperature, 2);
@@ -152,7 +155,8 @@ void loop()
     tft.println(" Km/h");
 
   unsigned long time = millis() + 10000;
-  while (millis() < time) {
+  bool btn = streetnames;
+  while (millis() < time && btn == streetnames) {
     int y = y_centre - analogRead(JOYSTICK_Y);
     if (y > 20) {
       zoom *= 0.8;
@@ -194,6 +198,6 @@ void speedometer() {
 }
 
 void buttonpress() {
-  Serial.print("button");
+  Serial.println("button");
   streetnames = !streetnames;
 }

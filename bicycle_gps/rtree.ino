@@ -82,6 +82,8 @@ void inner_lookup(Rect* bounds, int32_t index) {
 }
 
 void rtree_lookup(Rect* bounds) {
+  tft.setTextSize(1);
+  tft.setTextColor(38066);
   if (!file.open(sd.vwd(), "data.bin", O_READ)) {
     Serial.println("No data file");
     return;

@@ -5,16 +5,24 @@ typedef struct {
 } Point;
 
 typedef struct {
-  int32_t sub, x0, y0, x1, y1;
+  uint32_t sub;
+  int32_t x0, y0, x1, y1;
 } Rect;
+
+typedef struct {
+  uint16_t pointlen;
+  uint8_t namelen;
+  uint8_t flags;
+  char wayname;
+} Way;
 
 typedef union {
   Rect nodes[DEGREE];
-  Point points[(int)(DEGREE*2.5)];
+  Way way;
 } Spatial;
 
 typedef struct {
-  int32_t len;
+  uint8_t len;
   Spatial sub;
 } Node;
 

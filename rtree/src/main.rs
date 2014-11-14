@@ -322,6 +322,9 @@ impl TreeWriter for Way {
         try!(w.write_u8(self.name.len() as u8));
         try!(w.write_u8(self.flags.bits()));
 
+        try!(w.write_str(self.name.as_slice()));
+        try!(w.write_u8(0)); // C null byte
+
         for o in self.nodes.iter() {
             try!(o.write(w));
         }
@@ -362,6 +365,7 @@ fn parse_hstore(row: &Row) -> (String, WayFlags) {
         Some(&json::String(ref s)) if s.as_slice() == "trunk" => HOSTILE,
         Some(&json::String(ref s)) if s.as_slice() == "primary" => HOSTILE,
         Some(&json::String(ref s)) if s.as_slice() == "residential" => FRIENDLY,
+        Some(&json::String(ref s)) if s.as_slice() == "unclassified" => FRIENDLY,
         Some(&json::String(ref s)) if s.as_slice() == "cycleway" => FRIENDLY,
         _ => VANILLA,
     };
@@ -438,7 +442,7 @@ fn main() {
     f.seek(4, SeekSet).unwrap();
     let start = root.write(f).unwrap();
     f.seek(0, SeekSet).unwrap();
-    f.write_le_i32(start as i32).unwrap();
+    f.write_le_u32(start as u32).unwrap();
 }
 
 #[test]

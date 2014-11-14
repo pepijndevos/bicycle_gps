@@ -36,7 +36,8 @@ volatile unsigned long cycle_time;
 
 // joystick center
 int x_centre, y_centre;
-double zoom = 30000;
+double zoom = 10000;
+volatile bool streetnames = true;
 
 // file system
 SdFat sd;
@@ -92,6 +93,7 @@ void setup()
   tft.fillScreen(ILI9341_BLACK);
   tft.setRotation(1);
   tft.setTextColor(ILI9341_WHITE);
+  tft.setTextWrap(false);
 }
 
 void loop()
@@ -133,7 +135,7 @@ void loop()
                    .y0 = GPS.latitude_fixed - zoom,
                    .x1 = GPS.longitude_fixed + lon_zoom,
                    .y1 = GPS.latitude_fixed + zoom};
-    rtree_lookup(bounds);
+    rtree_lookup(&bounds);
     tft.fillCircle(tft.width()/2, tft.height()/2, 4, ILI9341_BLUE);
   }
   
@@ -192,5 +194,6 @@ void speedometer() {
 }
 
 void buttonpress() {
-  
+  Serial.print("button");
+  streetnames = !streetnames;
 }

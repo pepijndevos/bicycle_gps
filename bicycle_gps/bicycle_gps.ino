@@ -27,7 +27,15 @@ Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
 Adafruit_MPL3115A2 baro = Adafruit_MPL3115A2();
 
 // Set up GPS
-Adafruit_GPS GPS(&Serial2);
+Adafruit_GPS GPS(&UBRR2H, &UBRR2L, &UCSR2A, &UCSR2B, &UCSR2C, &UDR2);
+ISR(USART2_RX_vect)
+{
+  GPS.read();
+}
+ISR(USART2_UDRE_vect)
+{
+  GPS.write();
+}
 
 // joystick center
 int x_centre, y_centre;
@@ -57,7 +65,7 @@ void setup()
   //GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCONLY);
   // For parsing data, we don't suggest using anything but either RMC only or RMC+GGA since
   // the parser doesn't care about other sentences at this time
-  
+
   // Set the update rate
   GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);   // 1 Hz update rate
   // For the parsing code to work nicely and have time to sort thru the data, and
@@ -65,14 +73,6 @@ void setup()
 
   // Request updates on antenna status, comment out to keep quiet
   //GPS.sendCommand(PGCMD_ANTENNA);
-
-  // the nice thing about this code is you can have a timer0 interrupt go off
-  // every 1 millisecond, and read data from the GPS for you. that makes the
-  // loop code a heck of a lot easier!
-  // Timer0 is already used for millis() - we'll just interrupt somewhere
-  // in the middle and call the "Compare A" function
-  OCR0A = 0xAF;
-  TIMSK0 |= _BV(OCIE0A);
   
   // joystick
   pinMode(JOYSTICK, INPUT);
@@ -179,9 +179,4 @@ double lon_scale(int32_t lat) {
   double dlat = lat / 10000000.0;
   double rad = dlat * 0.0174532925;
   return cos(rad);
-}
-
-// Interrupt is called once a millisecond, looks for any new GPS data, and stores it
-SIGNAL(TIMER0_COMPA_vect) {
-  GPS.read();
 }

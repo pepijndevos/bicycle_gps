@@ -284,10 +284,11 @@ impl TreeWriter for Rect {
     }
 }
 
-fn seek_block(w: &mut Seek) -> IoResult<u64> {
+fn seek_block(w: &mut Seek, blocksize: u64) -> IoResult<u64> {
     // seek forward to the nearest 512 bytes
-    let offset = try!(w.tell()) + 511 & !511;
-    assert!(offset % 512 == 0);
+    let bsbits = blocksize - 1;
+    let offset = try!(w.tell()) + bsbits & !bsbits;
+    assert!(offset % blocksize == 0);
     try!(w.seek(offset as i64, SeekSet));
     return Ok(offset);
 }
@@ -296,14 +297,14 @@ impl TreeWriter for Node<Way> {
     fn write<U>(&self, w: &mut U) -> IoResult<u64> where U: Writer + Seek {
         match self.sub {
             Leaf(ref data) => {
-                let offset = try!(seek_block(w));
+                let offset = try!(seek_block(w, 512));
                 try!(w.write_u8(0)); // leaf node
                 try!(data.write(w));
                 return Ok(offset);
             },
             SubNodes(ref subs) => {
                 let offsets: Vec<u64> = subs.iter().filter_map(|sub| sub.write(w).ok()).collect();
-                let offset = try!(seek_block(w));
+                let offset = try!(seek_block(w, 512));
                 try!(w.write_u8(offsets.len() as u8));
                 for (o, sub) in offsets.into_iter().zip(subs.iter()) {
                     try!(w.write_le_u32(o as u32));
@@ -325,6 +326,8 @@ impl TreeWriter for Way {
         try!(w.write_str(self.name.as_slice()));
         try!(w.write_u8(0)); // C null byte
 
+        // allign points to 512 byte block
+        try!(seek_block(w, 8));
         for o in self.nodes.iter() {
             try!(o.write(w));
         }

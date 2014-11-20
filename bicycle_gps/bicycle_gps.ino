@@ -37,7 +37,7 @@ volatile unsigned long cycle_time;
 // joystick center
 int x_centre, y_centre;
 double zoom = 10000;
-volatile bool streetnames = true;
+volatile bool streetnames = false;
 
 // file system
 SdFat sd;

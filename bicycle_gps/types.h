@@ -29,4 +29,5 @@ typedef struct {
 typedef union {
   Node n;
   uint8_t buf[512];
+  Point points[512/sizeof(Point)];
 } NodeBuffer;

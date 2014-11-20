@@ -33,17 +33,22 @@ void draw_name(char* wayname, Point* point, Rect* bounds) {
   tft.println(wayname);
 }
 
-void draw_points(Way* w, Rect* bounds) {
+void draw_points(NodeBuffer* nb, Rect* bounds, uint32_t block) {
   // WARNIG: fence poles ahead.
   // the first points are in the node,
   // this means we can satisfy most without aditional reads
-  // but outliers should be read point-by-point.
+  // but outliers should be read block-by-block.
   // max |        avg         
   //-----+--------------------
   // 784 | 4.8219990810608790
+  Way* w = &nb->n.sub.way;
   int len = w->pointlen - 1; // minus last node
+  int namelen = w->namelen;
   char* wayname = &w->wayname;
-  Point* points = (Point*)(wayname + w->namelen + 1);
+  // tricky allignment code, includes padding and string lengths
+  // to make sure a point does not cross a block boundary
+  Point* points = (Point*)((uintptr_t)nb + (offsetof(NodeBuffer, n.sub.way.wayname) + namelen + 8 & ~7));
+
   uint16_t color = ILI9341_YELLOW;
   if (w->flags & 1) {
     color = ILI9341_GREEN;
@@ -52,26 +57,32 @@ void draw_points(Way* w, Rect* bounds) {
   } else if (w->flags & 4) {
     color = ILI9341_BLUE;
   }
-
-  for (int i = 0; i<len && i<5; i++) {
-    draw_line(bounds,
-      points[i].x, // pi
-      points[i].y,
-      points[i+1].x, //pi+1
-      points[i+1].y,
-      color);
+  uintptr_t bufend = (uintptr_t)nb + sizeof(NodeBuffer);
+  int i = 0;
+  while (len--) {
+    Point p1 = points[i];
+    i++;
+    if ((uintptr_t)&points[i] >= bufend) {
+      i = 0;
+      block++;
+      sd.card()->readBlock(block, nb->buf);
+      points = nb->points;
+      namelen = 0; // the name is no longer in memory, too lazy to copy
+    }
+    Point p2 = points[i];
+    draw_line(bounds, p1.x, p1.y, p2.x, p2.y, color);
   }
   
-  if (streetnames) draw_name(wayname, &points[len/2], bounds);
+  if (streetnames && namelen) draw_name(wayname, &points[len/2], bounds);
 }
-
 
 void inner_lookup(Rect* bounds, int32_t index) {
   NodeBuffer nb;
-  sd.card()->readBlock(bgnBlock + (index / 512), nb.buf);
+  uint32_t block = bgnBlock + (index / 512);
+  sd.card()->readBlock(block, nb.buf);
   
   if (!nb.n.len) {
-    draw_points(&nb.n.sub.way, bounds);
+    draw_points(&nb, bounds, block);
     return;
   }
   for (int i=0; i<nb.n.len; i++) {
